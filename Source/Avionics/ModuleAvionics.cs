@@ -32,6 +32,9 @@ namespace RP0
         [KSPField(isPersistant = true)]
         public bool systemEnabled = true;
 
+        [KSPField(isPersistant = true, guiActive = true, guiName = "Permanently disabled", groupName = PAWGroup, groupDisplayName = PAWGroup)]
+        public bool dead = false;
+
         [KSPField]
         public string techRequired = "";
 
@@ -52,7 +55,7 @@ namespace RP0
         protected virtual float GetInternalMassLimit() => massLimit;
         protected virtual float GetEnabledkW() => enabledkW;
         protected virtual float GetDisabledkW() => disabledkW;
-        protected virtual bool GetToggleable() => toggleable;
+        protected virtual bool GetToggleable() => !dead && toggleable;
         internal bool TechAvailable => string.IsNullOrEmpty(techRequired) || HighLogic.CurrentGame == null || HighLogic.CurrentGame.Mode == Game.Modes.SANDBOX || ResearchAndDevelopment.GetTechnologyState(techRequired) == RDTech.State.Available;
 
         /// <summary>
@@ -63,7 +66,7 @@ namespace RP0
         {
             get
             {
-                if (currentlyEnabled && TechAvailable && !IsLockedByInterplanetary)
+                if (!dead && currentlyEnabled && TechAvailable && !IsLockedByInterplanetary)
                     return GetInternalMassLimit();
                 else
                     return 0f;
@@ -103,14 +106,18 @@ namespace RP0
                 res.rate = 0;   // Disable the CommandModule consuming electric charge on init.
         }
 
-        public float PowerDraw(bool onRails = false) =>
-            part.protoModuleCrew?.Count > 0 || (systemEnabled && !(GetToggleable() && onRails)) ?
-            GetEnabledkW() : GetDisabledkW();
+        public float GetPowerDraw(bool onRails = false)
+        {
+            if (dead) return 0;
+
+            return part.protoModuleCrew?.Count > 0 || (systemEnabled && !(GetToggleable() && onRails)) ?
+                GetEnabledkW() : GetDisabledkW();
+        }
 
         protected void UpdateRate(bool onRails = false)
         {
             currentlyEnabled = systemEnabled && !(GetToggleable() && onRails);
-            float currentKW = PowerDraw(onRails);
+            float currentKW = GetPowerDraw(onRails);
             ecConsumption = new KeyValuePair<string, double>(ecName, -currentKW);
             currentWatts = currentKW * 1000;
             // If requested, let Kerbalism handle power draw, else handle via ModuleCommand resourceHandler.
@@ -126,15 +133,18 @@ namespace RP0
 
         protected virtual void SetActionsAndGui()
         {
-            var toggleAble = GetToggleable();
-            Events[nameof(ToggleEvent)].guiActive = toggleAble;
-            Events[nameof(ToggleEvent)].guiActiveEditor = toggleAble;
+            bool toggleable = GetToggleable();
+            Events[nameof(ToggleEvent)].guiActive = toggleable;
+            Events[nameof(ToggleEvent)].guiActiveEditor = toggleable;
             Events[nameof(ToggleEvent)].guiName = (systemEnabled ? "Shutdown" : "Activate") + " Avionics";
-            Events[nameof(ToggleEvent)].active = toggleAble;
-            Actions[nameof(ActivateAction)].active = (!systemEnabled || HighLogic.LoadedSceneIsEditor) && toggleAble;
-            Actions[nameof(ShutdownAction)].active = (systemEnabled || HighLogic.LoadedSceneIsEditor) && toggleAble;
-            Actions[nameof(ToggleAction)].active = toggleAble;
-            Fields[nameof(currentWatts)].guiActive = toggleAble;
+            Events[nameof(ToggleEvent)].active = toggleable;
+            Actions[nameof(ActivateAction)].active = (!systemEnabled || HighLogic.LoadedSceneIsEditor) && toggleable;
+            Actions[nameof(ShutdownAction)].active = (systemEnabled || HighLogic.LoadedSceneIsEditor) && toggleable;
+            Actions[nameof(ToggleAction)].active = toggleable;
+            Fields[nameof(currentWatts)].guiActive = toggleable;
+            Actions[nameof(KillAction)].active = !dead;
+            Events[nameof(KillEvent)].guiActive = !dead;
+            Events[nameof(KillEvent)].active = !dead;
         }
 
         protected void StageActivated(int stage)
@@ -181,6 +191,11 @@ namespace RP0
         // OnStartFinished() instead of OnStart(), to let ModuleCommand configure itself first.
         public override void OnStartFinished(StartState _)
         {
+            if (dead)
+            {
+                DisableModuleCommand();
+            }
+
             InitializeResourceRate();
             if (!GetToggleable())
                 toggleable = false;
@@ -215,7 +230,7 @@ namespace RP0
         // Too many ways to exit a scene, so always write the Disabled power draw
         public override void OnSave(ConfigNode node)
         {
-            node.SetValue(nameof(currentWatts), PowerDraw(true) * 1000);
+            node.SetValue(nameof(currentWatts), GetPowerDraw(true) * 1000);
         }
 
         protected void OnDestroy()
@@ -256,6 +271,18 @@ namespace RP0
             return retStr;
         }
 
+        protected void DisableModuleCommand()
+        {
+            ModuleCommand command = part.FindModuleImplementing<ModuleCommand>();
+            if (command != null)
+            {
+                command.enabled = false;
+                command.isEnabled = false;
+                command.moduleIsEnabled = false;
+                part.isControlSource = Vessel.ControlLevel.NONE;
+            }
+        }
+
         #endregion
 
         #region Actions and Events
@@ -264,12 +291,12 @@ namespace RP0
         public void ToggleEvent()
         {
             systemEnabled = !systemEnabled;
-            if (part.protoModuleCrew?.Count > 0)
+            if (!dead && part.protoModuleCrew?.Count > 0)
             {
                 systemEnabled = true;
                 ScreenMessages.PostScreenMessage("Cannot shut down avionics while crewed");
             }
-            else if (!GetToggleable())
+            else if (!dead && !GetToggleable())
             {
                 systemEnabled = true;
                 ScreenMessages.PostScreenMessage("Cannot shut down avionics on this part");
@@ -297,6 +324,25 @@ namespace RP0
         public void ActivateAction(KSPActionParam _)
         {
             systemEnabled = false;
+            ToggleEvent();
+        }
+
+        [KSPEvent(guiActive = true, guiActiveEditor = false, guiName = "Disable Avionics permanently", groupName = PAWGroup)]
+        public void KillEvent()
+        {
+            var options = new DialogGUIBase[] {
+                new DialogGUIButton("Yes", () => KillAction(null)),
+                new DialogGUIButton("No", () => {})
+            };
+            var dialog = new MultiOptionDialog("ConfirmDisableAvionics", "Are you sure you want to permanently disable the avionics unit? Doing this will prevent avionics from consuming power but it will no longer provide any control either.", "Disable Avionics", HighLogic.UISkin, 300, options);
+            PopupDialog.SpawnPopupDialog(dialog, true, HighLogic.UISkin);
+        }
+
+        [KSPAction("Disable Avionics permanently")]
+        public void KillAction(KSPActionParam _)
+        {
+            dead = true;
+            DisableModuleCommand();
             ToggleEvent();
         }
         #endregion
