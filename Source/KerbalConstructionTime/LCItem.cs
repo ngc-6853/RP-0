@@ -129,7 +129,7 @@ namespace KerbalConstructionTime
             Name = lcName;
 
             _id = Guid.NewGuid();
-            _modID = Guid.NewGuid();
+            _modID = _id;
             _ksc = ksc;
             LCType = lcType;
             IsHumanRated = isHuman;

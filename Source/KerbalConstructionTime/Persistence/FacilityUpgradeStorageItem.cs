@@ -15,6 +15,9 @@ namespace KerbalConstructionTime
         public string id, commonName;
 
         [Persistent]
+        public Guid uid;
+
+        [Persistent]
         public bool UpgradeProcessed;
 
         public FacilityUpgrade ToFacilityUpgrade()
@@ -39,7 +42,8 @@ namespace KerbalConstructionTime
             ret.FacilityType = facilityType;
             ret.UpgradeLevel = upgradeLevel;
             ret.CurrentLevel = currentLevel;
-            ret.Id = id;
+            ret.FacilityInternalID = id;
+            ret.ID = uid;
             // back-compat
             if (!string.IsNullOrEmpty(commonName))
             {
@@ -55,7 +59,8 @@ namespace KerbalConstructionTime
             sFacilityType = fu.FacilityType?.ToString();
             upgradeLevel = fu.UpgradeLevel;
             currentLevel = fu.CurrentLevel;
-            id = fu.Id;
+            id = fu.FacilityInternalID;
+            uid = fu.ID;
             return this;
         }
     }

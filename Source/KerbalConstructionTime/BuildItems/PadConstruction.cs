@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace KerbalConstructionTime
@@ -59,6 +58,16 @@ namespace KerbalConstructionTime
                     --pc.LaunchpadIndex;
 
             LC.PadConstructions.Remove(this);
+
+            try
+            {
+                KCTEvents.OnPadConstructionCancel?.Fire(this, lp);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+
             LC.KSC.RecalculateBuildRates(false);
         }
 

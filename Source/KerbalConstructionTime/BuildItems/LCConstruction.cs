@@ -66,6 +66,16 @@ namespace KerbalConstructionTime
             }
 
             KSC.LCConstructions.Remove(this);
+
+            try
+            {
+                KCTEvents.OnLCConstructionCancel?.Fire(this, lc);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+
             KSC.RecalculateBuildRates(false);
         }
     }
